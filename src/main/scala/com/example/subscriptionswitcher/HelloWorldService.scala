@@ -72,7 +72,7 @@ class HelloWorldService[F[_]: Effect](implicit ec: ExecutionContext) extends Htt
             send = frameStream(streamQueue, errorQueue),
             receive = frameSink(
               queryHandler(streamQueue, cancelRef),
-              errorQueue.enqueue1,
+              errorHandler(errorQueue),
             )
           )
         } yield cxn
