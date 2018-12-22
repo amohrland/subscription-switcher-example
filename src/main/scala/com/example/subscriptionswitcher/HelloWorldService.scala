@@ -20,28 +20,27 @@ class HelloWorldService[F[_]: Effect](implicit ec: ExecutionContext) extends Htt
     HttpService[F] {
       case GET -> Root / "ws" =>
         def getNextStream(query: Q): F[(Stream[F, D], F[Unit])] =
+          percolator.registerQuery(query) *>
+            percolator.getPercolation(query)
+              .flatMap(cancellableStream)
+
+        def cancellableStream[A](stream: Stream[F,A]): F[(Stream[F,A], F[Unit])] =
           for {
             cancelQ <- async.mutable.Queue.unbounded[F,Boolean]
-            cancel = cancelQ.enqueue1(true)
-            _ <- percolator.registerQuery(query)
-            ss <- percolator.getPercolation(query)
-            result = ss.interruptWhen(cancelQ.dequeue).mask
-          } yield (result, cancel)
+          } yield (
+            stream.interruptWhen(cancelQ.dequeue).mask,
+            cancelQ.enqueue1(true),
+          )
 
         def queryHandler(
           documentStreamQueue: async.mutable.Queue[F,Stream[F,D]],
           cancelRef: async.Ref[F,F[Unit]],
         )(query: Q): F[Unit] =
           for {
-            _ <- Sync[F].delay(println(s"======= Got frame: ${query}"))
             (nextStream, cancelNext) <- getNextStream(query)
-            _ <- Sync[F].delay(println(s"======= Fetched next stream"))
             _ <- cancelRef.get.flatten
-            _ <- Sync[F].delay(println(s"======= Cancelled old stream"))
             _ <- cancelRef.setSync(cancelNext)
-            _ <- Sync[F].delay(println(s"======= Set new cancel action"))
             _ <- documentStreamQueue.enqueue1(nextStream)
-            _ <- Sync[F].delay(println(s"======= Enqueued next stream"))
           } yield ()
 
         def errorHandler(errorQueue: async.mutable.Queue[F,E])(e: E): F[Unit] =
