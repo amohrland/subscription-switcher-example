@@ -14,12 +14,12 @@ object HelloWorldServer extends StreamApp[IO] {
 }
 
 object ServerStream {
-
   def stream[F[_]: Effect](implicit ec: ExecutionContext) = for {
     scheduler <- Scheduler(1)
     serverStream <- BlazeBuilder[F]
       .bindHttp(8080, "0.0.0.0")
-      .mountService(new HelloWorldService[F].service(scheduler), "/")
+      .mountService(new HelloWorldService[F]
+        .service(StubbedPercolator(scheduler), StringyWebSocketCodec()), "/")
       .serve
   } yield serverStream
 }
