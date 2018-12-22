@@ -33,25 +33,22 @@ class HelloWorldService[F[_]: Effect](implicit ec: ExecutionContext) extends Htt
           )
 
         def queryHandler(
-          documentStreamQueue: async.mutable.Queue[F,Stream[F,D]],
-          cancelRef: async.Ref[F,F[Unit]],
+          documentStreamSignal: async.mutable.Signal[F,(Stream[F,D],F[Unit])],
         )(query: Q): F[Unit] =
           for {
-            (nextStream, cancelNext) <- getNextStream(query)
-            _ <- cancelRef.get.flatten
-            _ <- cancelRef.setSync(cancelNext)
-            _ <- documentStreamQueue.enqueue1(nextStream)
+            nextStream_canceller <- getNextStream(query)
+            _ <- documentStreamSignal.get.map(_._2).flatten
+            _ <- documentStreamSignal.set(nextStream_canceller)
           } yield ()
 
         def errorHandler(errorQueue: async.mutable.Queue[F,E])(e: E): F[Unit] =
           errorQueue.enqueue1(e)
 
         def frameStream(
-          documents: async.mutable.Queue[F,Stream[F,D]],
+          documents: async.immutable.Signal[F,(Stream[F,D],F[Unit])],
           errors: async.mutable.Queue[F,E],
         ): Stream[F, WebSocketFrame] =
-          documents
-            .dequeue
+          documents.discrete.map(_._1)
             .flatten
             .map(webSocketCodec.successAsFrame(_))
             .merge(
@@ -65,13 +62,12 @@ class HelloWorldService[F[_]: Effect](implicit ec: ExecutionContext) extends Htt
             webSocketCodec.fromFrame(frame).fold(errorHandler, queryHandler))
 
         for {
-          streamQueue <- async.mutable.Queue.unbounded[F,Stream[F,D]]
+          streamSignal <- async.mutable.Signal[F,(Stream[F,D],F[Unit])]((Stream.empty,Sync[F].unit))
           errorQueue <- async.mutable.Queue.unbounded[F,E]
-          cancelRef <- async.refOf[F,F[Unit]](Sync[F].unit)
           cxn <- WebSocketBuilder[F].build(
-            send = frameStream(streamQueue, errorQueue),
+            send = frameStream(streamSignal, errorQueue),
             receive = frameSink(
-              queryHandler(streamQueue, cancelRef),
+              queryHandler(streamSignal),
               errorHandler(errorQueue),
             )
           )
