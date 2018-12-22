@@ -9,20 +9,21 @@ import org.http4s.circe._
 import org.http4s.dsl.Http4sDsl
 import org.http4s.server.websocket.WebSocketBuilder
 import org.http4s.websocket.WebsocketBits.WebSocketFrame
+import scala.concurrent.duration._
 
 import scala.concurrent.ExecutionContext
 
 class HelloWorldService[F[_]: Effect](implicit ec: ExecutionContext) extends Http4sDsl[F] {
   type CancelQueue[F[_]] = async.mutable.Queue[F,Boolean]
 
-  val service: HttpService[F] = {
+  def service(scheduler: Scheduler): HttpService[F] = {
     HttpService[F] {
       case GET -> Root / "ws" =>
         def getNextStream(s:WebSocketFrame): F[(Stream[F, WebSocketFrame], F[Unit])] =
           for {
             cancelQ <- async.mutable.Queue.unbounded[F,Boolean]
             cancel = cancelQ.enqueue1(true)
-            result <- Sync[F].delay{Stream.emit(s).repeat.covary[F].interruptWhen(cancelQ.dequeue).mask}
+            result = scheduler.awakeEvery(1.seconds).as(s).interruptWhen(cancelQ.dequeue).mask
           } yield (result, cancel)
 
 

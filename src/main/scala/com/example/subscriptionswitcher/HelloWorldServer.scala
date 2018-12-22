@@ -1,7 +1,8 @@
 package com.example.subscriptionswitcher
 
+import cats.implicits._
 import cats.effect.{Effect, IO}
-import fs2.StreamApp
+import fs2._
 import org.http4s.server.blaze.BlazeBuilder
 
 import scala.concurrent.ExecutionContext
@@ -14,12 +15,11 @@ object HelloWorldServer extends StreamApp[IO] {
 
 object ServerStream {
 
-  def helloWorldService[F[_]: Effect](implicit executionContext: ExecutionContext) =
-    new HelloWorldService[F].service
-
-  def stream[F[_]: Effect](implicit ec: ExecutionContext) =
-    BlazeBuilder[F]
+  def stream[F[_]: Effect](implicit ec: ExecutionContext) = for {
+    scheduler <- Scheduler(1)
+    serverStream <- BlazeBuilder[F]
       .bindHttp(8080, "0.0.0.0")
-      .mountService(helloWorldService, "/")
+      .mountService(new HelloWorldService[F].service(scheduler), "/")
       .serve
+  } yield serverStream
 }
